@@ -778,37 +778,170 @@ try {
     }
     
     # Process additional servers
-    {
-        $serverCount = 1
+    $serverCount = 1
+    
+    while ($true) {
+        $additionalServer = Get-AdditionalServerInfo
+        if ($null -eq $additionalServer) {
+            break  # User chose not to add more servers
+        }
         
-        while ($true) {
-            $additionalServer = Get-AdditionalServerInfo
-            if ($null -eq $additionalServer) {
-                break  # User chose not to add more servers
+        $serverCount++
+        Write-Host "`n=== Processing Server $serverCount ===" -ForegroundColor Magenta
+        
+        $serverResult = Get-PRTGServerUsers -ServerUrl $additionalServer.Server -Username $additionalServer.Username -Password $additionalServer.Password
+        
+        if ($serverResult.Success) {
+            $allServerData += $serverResult
+            $totalUsers += $serverResult.Users.Count
+            
+            # Add to Excel workbook as new worksheet
+            Write-Host "Adding server data to Excel workbook..." -ForegroundColor Yellow
+            # Sanitize worksheet name - Excel has restrictions on worksheet names
+            $worksheetName = $serverResult.ServerName -replace '[\\\/\?\*\[\]:]', '_'
+            if ($worksheetName.Length -gt 31) {
+                $worksheetName = $worksheetName.Substring(0, 31)
             }
+                    
+            # Add new worksheet to existing Excel file using Python
+            Add-ExcelWorksheetPython -Data $serverResult.Users -Path $OutputPath -WorksheetName $worksheetName -FreezeTopRow -BoldTopRow -AutoFilter -ColumnWidths @{1=35; 2=25; 3=15; 4=18}
+        } else {
+            Write-Error "Failed to process server $($additionalServer.Server): $($serverResult.ErrorMessage)"
+            Write-Host "Continuing with next server..." -ForegroundColor Yellow
+        }
+    }
+    
+    # Create Summary worksheet with all server statistics
+    if ($allServerData.Count -gt 0) {
+        Write-Host "`nCreating Summary worksheet..." -ForegroundColor Yellow
+        
+        # Build summary data
+        $summaryData = @()
+        
+        # Add overall summary row
+        $totalActiveUsers = 0
+        $totalPausedUsers = 0
+        $totalUnknownUsers = 0
+        
+        foreach ($serverData in $allServerData) {
+            $totalActiveUsers += ($serverData.Users | Where-Object { $_."Account Status" -eq "Active" }).Count
+            $totalPausedUsers += ($serverData.Users | Where-Object { $_."Account Status" -eq "Paused" }).Count
+            $totalUnknownUsers += ($serverData.Users | Where-Object { $_."Account Status" -notin @("Active", "Paused") }).Count
+        }
+        
+        # Add header summary
+        $summaryData += [PSCustomObject]@{
+            "Category" = "OVERALL SUMMARY"
+            "Server" = "All Servers"
+            "Total Users" = $totalUsers
+            "Active Users" = $totalActiveUsers
+            "Paused Users" = $totalPausedUsers
+            "Unknown Status" = $totalUnknownUsers
+            "Report Date" = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        }
+        
+        # Add blank row for spacing
+        $summaryData += [PSCustomObject]@{
+            "Category" = ""
+            "Server" = ""
+            "Total Users" = ""
+            "Active Users" = ""
+            "Paused Users" = ""
+            "Unknown Status" = ""
+            "Report Date" = ""
+        }
+        
+        # Add per-server breakdown
+        $summaryData += [PSCustomObject]@{
+            "Category" = "SERVER BREAKDOWN"
+            "Server" = ""
+            "Total Users" = ""
+            "Active Users" = ""
+            "Paused Users" = ""
+            "Unknown Status" = ""
+            "Report Date" = ""
+        }
+        
+        foreach ($serverData in $allServerData) {
+            $activeCount = ($serverData.Users | Where-Object { $_."Account Status" -eq "Active" }).Count
+            $pausedCount = ($serverData.Users | Where-Object { $_."Account Status" -eq "Paused" }).Count
+            $unknownCount = ($serverData.Users | Where-Object { $_."Account Status" -notin @("Active", "Paused") }).Count
             
-            $serverCount++
-            Write-Host "`n=== Processing Server $serverCount ===" -ForegroundColor Magenta
-            
-            $serverResult = Get-PRTGServerUsers -ServerUrl $additionalServer.Server -Username $additionalServer.Username -Password $additionalServer.Password
-            
-            if ($serverResult.Success) {
-                $allServerData += $serverResult
-                $totalUsers += $serverResult.Users.Count
-                
-                # Add to Excel workbook as new worksheet
-                Write-Host "Adding server data to Excel workbook..." -ForegroundColor Yellow
-                # Sanitize worksheet name - Excel has restrictions on worksheet names
-                $worksheetName = $serverResult.ServerName -replace '[\\\/\?\*\[\]:]', '_'
-                if ($worksheetName.Length -gt 31) {
-                    $worksheetName = $worksheetName.Substring(0, 31)
+            $summaryData += [PSCustomObject]@{
+                "Category" = "Server Details"
+                "Server" = $serverData.ServerName
+                "Total Users" = $serverData.Users.Count
+                "Active Users" = $activeCount
+                "Paused Users" = $pausedCount
+                "Unknown Status" = $unknownCount
+                "Report Date" = ""
+            }
+        }
+        
+        # Add Summary worksheet to Excel file
+        Add-ExcelWorksheetPython -Data $summaryData -Path $OutputPath -WorksheetName "Summary" -FreezeTopRow -BoldTopRow -AutoFilter -ColumnWidths @{1=20; 2=35; 3=12; 4=12; 5=12; 6=14; 7=20}
+        
+        # Now we need to reorder the worksheets to make Summary first
+        # This requires a Python script to reorder worksheets
+        Write-Host "Reordering worksheets to place Summary first..." -ForegroundColor Yellow
+        
+        $reorderScript = @"
+import openpyxl
+import sys
+
+try:
+    # Load the workbook
+    wb = openpyxl.load_workbook('$OutputPath')
+    
+    # Get all worksheet names
+    sheet_names = wb.sheetnames
+    
+    # Check if Summary exists
+    if 'Summary' in sheet_names:
+        # Move Summary to first position
+        summary_sheet = wb['Summary']
+        wb.move_sheet(summary_sheet, offset=-(sheet_names.index('Summary')))
+        
+    # Save the reordered workbook
+    wb.save('$OutputPath')
+    print("✓ Summary worksheet moved to first position")
+    
+except Exception as e:
+    print(f"Warning: Could not reorder worksheets: {e}")
+    # Non-fatal error, continue
+"@
+        
+        # Execute reorder script
+        $pythonCmd = $null
+        $pythonCommands = @('python3', 'python', 'py -3')
+        
+        foreach ($cmd in $pythonCommands) {
+            try {
+                $pythonVersion = if ($cmd -eq 'py -3') { 
+                    Invoke-Expression "$cmd --version" 2>&1 
+                } else { 
+                    & $cmd --version 2>&1 
                 }
-                        
-                # Add new worksheet to existing Excel file using Python
-                Add-ExcelWorksheetPython -Data $serverResult.Users -Path $OutputPath -WorksheetName $worksheetName -FreezeTopRow -BoldTopRow -AutoFilter -ColumnWidths @{1=35; 2=25; 3=15; 4=18}
-            } else {
-                Write-Error "Failed to process server $($additionalServer.Server): $($serverResult.ErrorMessage)"
-                Write-Host "Continuing with next server..." -ForegroundColor Yellow
+                
+                if ($pythonVersion -match "Python 3\.\d+") {
+                    $pythonCmd = $cmd
+                    break
+                }
+            } catch {
+                # Continue to next command
+            }
+        }
+        
+        if ($pythonCmd) {
+            try {
+                $result = if ($pythonCmd -eq 'py -3') {
+                    Invoke-Expression "$pythonCmd -c `"$reorderScript`"" 2>&1
+                } else {
+                    & $pythonCmd -c $reorderScript 2>&1
+                }
+                Write-Host $result -ForegroundColor Green
+            } catch {
+                Write-Warning "Could not reorder worksheets: $_"
             }
         }
     }
@@ -817,6 +950,9 @@ try {
     if (Test-Path $OutputPath) {
         $fileInfo = Get-Item $OutputPath
         Write-Host "`n✓ Multi-server report exported to Excel: $OutputPath" -ForegroundColor Green
+        Write-Host "  • Summary worksheet with overall statistics" -ForegroundColor Gray
+        Write-Host "  • Individual worksheets for each server" -ForegroundColor Gray
+        Write-Host "  • File size: $([math]::Round($fileInfo.Length / 1KB, 2)) KB" -ForegroundColor Gray
     } else {
         Write-Warning "Excel file was not created"
     }

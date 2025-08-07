@@ -32,7 +32,7 @@ Advanced script that scrapes PRTG server web interfaces to create comprehensive 
 - Continues until user chooses "No"
 
 ### Excel Output (.xlsx)
-- **Excel output** with multiple worksheets (one per server)
+- **Summary worksheet** as the first sheet with overall statistics and per-server breakdown
 - **Each server gets its own worksheet** named after the server hostname
 - **Auto-formatted headers** (bold, frozen top row)
 - **Auto-filter enabled** for easy sorting/filtering
@@ -46,9 +46,10 @@ Advanced script that scrapes PRTG server web interfaces to create comprehensive 
 - **Last Login Date**: Last login date in M/d/yyyy format (e.g., "8/5/2025"), or "(has not logged in yet)" for users who have never logged in
 
 ### Summary Report
-- **Total users** across all servers
-- **Per-server breakdown** with user counts and status
-- **Processing results** for each server
+- **Excel Summary worksheet** with overall statistics (first sheet in workbook)
+- **Total users** across all servers with active/paused/unknown counts
+- **Per-server breakdown** with user counts and status distribution
+- **Console output** showing processing results for each server
 
 ## Permissions
 
