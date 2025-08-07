@@ -1,0 +1,35 @@
+# Excel output files
+*.xlsx
+*.xls
+*.csv
+
+# Excel temporary files
+~$*.xlsx
+~$*.xls
+
+# PowerShell execution policy bypass files
+*.ps1.bat
+
+# Log files
+*.log
+
+# Sensitive configuration files
+config.json
+credentials.json
+*.secret
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
